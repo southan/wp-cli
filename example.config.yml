@@ -1,0 +1,12 @@
+require:
+  - includes.php
+core install:
+  admin_user: alex
+  admin_email: alex@wordpress.local
+  skip-email: true
+core download:
+  skip-content: true
+config create:
+  dbuser: root
+  dbcharset: utf8mb4
+  dbcollate: utf8mb4_0900_ai_ci

@@ -1,0 +1,30 @@
+<?php
+
+define( 'WP_DEBUG', true );
+define( 'WP_DEBUG_LOG', __DIR__ . '/debug.log' );
+define( 'WP_POST_REVISIONS', false );
+define( 'WP_ENVIRONMENT_TYPE', 'local' );
+
+$table_prefix = '{{ table_prefix }}';
+
+define( 'DB_NAME',     '{{ DB_NAME }}' );
+define( 'DB_USER',     '{{ DB_USER }}' );
+define( 'DB_PASSWORD', '{{ DB_PASSWORD }}' );
+define( 'DB_HOST',     '{{ DB_HOST }}' );
+define( 'DB_CHARSET',  '{{ DB_CHARSET }}' );
+define( 'DB_COLLATE',  '{{ DB_COLLATE }}' );
+
+define( 'AUTH_KEY',         '{{ AUTH_KEY }}' );
+define( 'SECURE_AUTH_KEY',  '{{ SECURE_AUTH_KEY }}' );
+define( 'LOGGED_IN_KEY',    '{{ LOGGED_IN_KEY }}' );
+define( 'NONCE_KEY',        '{{ NONCE_KEY }}' );
+define( 'AUTH_SALT',        '{{ AUTH_SALT }}' );
+define( 'SECURE_AUTH_SALT', '{{ SECURE_AUTH_SALT }}' );
+define( 'LOGGED_IN_SALT',   '{{ LOGGED_IN_SALT }}' );
+define( 'NONCE_SALT',       '{{ NONCE_SALT }}' );
+
+if ( ! defined( 'ABSPATH' ) ) {
+	define( 'ABSPATH', __DIR__ . '/' );
+}
+
+require_once ABSPATH . 'wp-settings.php';
