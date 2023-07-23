@@ -90,10 +90,10 @@ class Target {
 			$args += parse_ssh_url( $args['ssh'] );
 		}
 
-		foreach ( array_keys( get_object_vars( $this ) ) as $prop ) {
-			if ( isset( $args[ $prop ] ) ) {
-				$this->$prop = $args[ $prop ];
-			}
+		$props = array_intersect_key( $args, get_object_vars( $this ) );
+
+		foreach ( $props as $prop => $value ) {
+			$this->$prop = $value;
 		}
 	}
 
