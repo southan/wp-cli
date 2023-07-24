@@ -20,7 +20,7 @@ WP_CLI::add_command( 'run', function ( $args ) {
 	while ( true ) {
 		foreach ( [ "$path/$name", "$path/$name.php" ] as $file ) {
 			if ( is_file( $file ) ) {
-				break;
+				break 2;
 			}
 
 			$file = null;
