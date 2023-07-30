@@ -16,84 +16,53 @@
  *     # Delete all revisions, drafts and post tags
  *     $ wp clean revision draft post_tag
  */
-WP_CLI::add_command( 'clean', function ( $args ) {
+WP_CLI::add_command( 'clean', function ( $types ) {
 	global $wpdb;
 
-	$placeholders = implode( ',', array_fill( 0, count( $args ), '%s' ) );
+	$placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
 
-	$post_ids = $wpdb->get_col( $wpdb->prepare(
-		<<<SQL
-		SELECT ID FROM $wpdb->posts
-		WHERE post_type IN($placeholders)
-		OR post_status IN($placeholders)
-		SQL,
-		...$args,
-		...$args
-	) );
+	$actions = [
+		'posts' => [
+			'count' => <<<SQL
+				SELECT COUNT(*) FROM $wpdb->posts
+				WHERE post_type IN( $placeholders )
+				SQL,
+			'delete' => <<<SQL
+				DELETE a,b,c FROM $wpdb->posts a
+				LEFT JOIN $wpdb->term_relationships b ON (a.ID = b.object_id)
+				LEFT JOIN $wpdb->postmeta c ON (a.ID = c.post_id)
+				WHERE a.post_type IN( $placeholders )
+				SQL,
+		],
 
-	if ( $post_ids ) {
-		$total = count( $post_ids );
+		'terms' => [
+			'count' => <<<SQL
+				SELECT COUNT(*) FROM $wpdb->term_taxonomy
+				WHERE taxonomy IN( $placeholders )
+				SQL,
+			'delete' => <<<SQL
+				DELETE a,b,c,d FROM $wpdb->term_taxonomy a
+				LEFT JOIN $wpdb->terms b ON (a.term_id = b.term_id)
+				LEFT JOIN $wpdb->term_relationships c ON (a.term_taxonomy_id = c.term_taxonomy_id)
+				LEFT JOIN $wpdb->termmeta d ON (a.term_id = d.term_id)
+				WHERE a.taxonomy IN( $placeholders )
+				SQL,
+		],
+	];
 
-		$progress = $total > 100
-			? WP_CLI\Utils\make_progress_bar( 'Deleting posts', $total )
-			: null;
+	foreach ( $actions as $type => $query ) {
+		$count = $wpdb->get_var( $wpdb->prepare( $query['count'], ...$types ) );
 
-		$deleted_count = 0;
+		if ( $count ) {
+			$wpdb->query( $wpdb->prepare( $query['delete'], ...$types ) );
 
-		foreach ( $post_ids as $post_id ) {
-			$result = wp_delete_post( $post_id, true );
-
-			$progress && $progress->tick();
-
-			if ( ! $result ) {
-				WP_CLI::warning( "Could not delete post $post_id." );
-			} else {
-				$deleted_count++;
-			}
-		}
-
-		$progress && $progress->finish();
-
-		if ( $deleted_count ) {
-			WP_CLI::success( "Deleted $deleted_count posts." );
-		}
-	}
-
-	$terms = $wpdb->get_results( $wpdb->prepare(
-		<<<SQL
-		SELECT term_id, taxonomy FROM $wpdb->term_taxonomy
-		WHERE taxonomy IN($placeholders)
-		SQL,
-		...$args
-	) );
-
-	if ( $terms ) {
-		$total = count( $terms );
-
-		$progress = $total > 100
-			? WP_CLI\Utils\make_progress_bar( 'Deleting terms', $total )
-			: null;
-
-		$deleted_count = 0;
-
-		foreach ( $terms as $term ) {
-			$result = wp_delete_term( $term->term_id, $term->taxonomy );
-
-			$progress && $progress->tick();
-
-			if ( is_wp_error( $result ) ) {
-				WP_CLI::warning( "Term $term->term_id: " . WP_CLI::error_to_string( $result ) );
-			} elseif ( ! $result ) {
-				WP_CLI::warning( "Could not delete term $term->term_id." );
-			} else {
-				$deleted_count++;
-			}
-		}
-
-		$progress && $progress->finish();
-
-		if ( $deleted_count ) {
-			WP_CLI::success( "Deleted $count terms." );
+			WP_CLI::success( "Deleted $count $type." );
 		}
 	}
+
+	foreach ( $types as $type ) {
+		delete_option( $type . '_children' );
+	}
+
+	wp_cache_flush();
 });
