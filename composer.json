@@ -1,0 +1,24 @@
+{
+	"name": "southan/wp-cli",
+	"description": "Extension pack for developing with WP-CLI & remote WordPress",
+	"type": "wp-cli-package",
+	"homepage": "https://github.com/southan/wp-cli",
+	"license": "GPL-3.0-or-later",
+	"authors": [
+		{
+			"name": "Alex Southan",
+			"homepage": "https://southan.dev"
+		}
+	],
+	"require": {
+		"php": ">=8.0"
+	},
+	"autoload": {
+		"classmap": [
+			"src/"
+		],
+		"files": [
+			"utils.php"
+		]
+	}
+}
