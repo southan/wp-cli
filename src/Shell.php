@@ -65,7 +65,11 @@ class Shell {
 	 * Set environment variables.
 	 */
 	public function env( ?array $env ) : self {
-		$this->result->env = $env;
+		if ( $env === null ) {
+			unset( $this->result->env );
+		} else {
+			$this->result->env = $env;
+		}
 
 		return $this;
 	}
