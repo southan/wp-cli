@@ -5,7 +5,7 @@ Extension pack for developing with WP-CLI & remote WordPress.
 
 ## Fluent shell API
 
-Easily build, execute, and handle system commands.
+Easily compose and handle system commands.
 
 ```php
 $zip = new WP_CLI\Shell( 'zip' );
@@ -18,7 +18,7 @@ $zip->cwd( __DIR__ . '/src' );
 
 // Set environment variables
 $zip->env([
-	'ZIPOPT' => '-D',
+    'ZIPOPT' => '-D',
 ]);
 
 // Exit on failure
@@ -32,11 +32,11 @@ $zip->warn();
 
 // Chainable
 $zip->add( 'archive.zip', '.' )
-	->cwd( __DIR__ . '/src' )
-	->env([
-		'ZIPOPT' => '-FS'
-	])
-	->fail();
+    ->cwd( __DIR__ . '/src' )
+    ->env([
+        'ZIPOPT' => '-FS'
+    ])
+    ->fail();
 
 // Get command output
 $out = $zip->get();
@@ -52,7 +52,7 @@ $is_ok = $zip->is_ok();
 
 // Check command exit code
 if ( $shell->is( 12 ) ) {
-	WP_CLI::warning( 'Nothing to ZIP.' );
+    WP_CLI::warning( 'Nothing to ZIP.' );
 }
 ```
 
@@ -61,18 +61,18 @@ if ( $shell->is( 12 ) ) {
 Universal API for both system and WP-CLI commands.
 
 ```php
-$commander = new WP_CLI\Commander([
-	// Set debug group for all commands
-	'debug' => 'my_debug',
+$commander = new WP_CLI\Commander(
+    // Set debug group for all commands
+    debug: 'my_debug',
 
-	// Set default failure mode (default THROW)
-	'mode' => WP_CLI\Shell::EXIT,
+    // Set default failure mode (default THROW)
+    mode: WP_CLI\Shell::EXIT,
 
-	// Set WP-CLI runtime config (default is current runtime)
-	'wp_config' => [
-		'path' => '/path/to/another/wordpress',
-	],
-]);
+    // Set WP-CLI runtime config (default is current runtime)
+    wp_config: [
+        'path' => '/path/to/another/wordpress',
+    ],
+);
 
 // System shell
 $home = $commander->sh( 'echo $HOME' )->get();
@@ -149,13 +149,13 @@ Install (& uninstall) persistent scripts.
 
 ```php
 $mu_plugin = new WP_CLI\MU_Plugin(
-	name: 'Welcome Notice',
-	description: 'Set a welcome notice in the WordPress admin.'
+    name: 'Welcome Notice',
+    description: 'Set a welcome notice in the WordPress admin.'
 );
 
 $code = <<<PHP
 add_action( 'admin_notices', function () {
-	wp_admin_notice( 'Welcome to WordPress!' );
+    wp_admin_notice( 'Welcome to WordPress!' );
 });
 PHP;
 

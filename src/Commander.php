@@ -10,17 +10,11 @@ use WP_CLI\Utils;
  */
 class Commander {
 
-	public int $mode = Shell::THROW;
-	public ?string $debug = null;
-	public ?array $wp_config = null;
-
-	public function __construct( array $props = [] ) {
-		foreach ( $props as $prop => $value ) {
-			if ( \property_exists( $this, $prop ) ) {
-				$this->$prop = $value;
-			}
-		}
-	}
+	public function __construct(
+		public int     $mode = Shell::THROW,
+		public ?string $debug = null,
+		public ?array  $wp_config = null
+	) {}
 
 	public function sh( string $cmd, string | array ...$args ) : Shell {
 		return new Shell(
@@ -35,7 +29,7 @@ class Commander {
 		global $argv;
 
 		$wp = Utils\esc_cmd( '%s %s', Utils\get_php_binary(), $argv[0] );
-		$wp .= Utils\options_to_str( $this->wp_config ?? Utils\get_runner()->runtime_config );
+		$wp .= Utils\options_to_str( $this->wp_config ?? WP_CLI::get_runner()->runtime_config );
 
 		$cmd .= Utils\args_to_cmd( $args );
 

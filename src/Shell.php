@@ -53,6 +53,19 @@ class Shell {
 	}
 
 	/**
+	 * Add unescaped arguments to the current command.
+	 */
+	public function add_raw( string | array ...$args ) : self {
+		$args = implode( ' ', Utils\parse_list( $args, null ) );
+
+		if ( \strlen( $args ) ) {
+			$this->result->command .= " $args";
+		}
+
+		return $this;
+	}
+
+	/**
 	 * Set working directory.
 	 */
 	public function cwd( ?string $cwd ) : self {

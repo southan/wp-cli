@@ -9,19 +9,29 @@ use WP_CLI\Utils;
 
 class Ssh extends Remote {
 
-	public string $host;
-	public ?string $user = null;
-	public ?int $port = null;
-	public ?string $key = null;
-	public ?string $proxyjump = null;
-	public ?string $socket = null;
-
-	public function __construct( array $props = [] ) {
-		parent::__construct( $props );
-
+	public function __construct(
+		public string  $host,
+		public ?string $user = null,
+		public ?int    $port = null,
+		public ?string $key = null,
+		public ?string $proxyjump = null,
+		public ?string $socket = null,
+		public ?string $name = null,
+		public ?string $path = null,
+		public ?string $home = null,
+		public ?string $url = null,
+		public int     $mode = Shell::THROW,
+		public ?string $debug = null,
+		public ?array  $wp_config = null
+	) {
 		if ( ! isset( $this->host ) ) {
 			WP_CLI::error( 'Host is required.' );
 		}
+
+		$this->wp_config ??= \array_filter([
+			'path' => $this->path,
+			'url' => $this->url,
+		]);
 	}
 
 	public function get_destination() : string {
@@ -100,7 +110,7 @@ class Ssh extends Remote {
 
 		$rsync->stream();
 
-		if ( $rsync->is_ok() || ! $rsync->is( 127 ) ) {
+		if ( ! $rsync->is( 127 ) ) {
 			return $rsync->is_ok();
 		}
 

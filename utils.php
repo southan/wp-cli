@@ -2,20 +2,7 @@
 
 namespace WP_CLI\Utils;
 
-use WP_CLI;
 use WP_CLI\Process;
-use WP_CLI\Runner;
-
-/**
- * Get WP-CLI runner instance.
- */
-function get_runner() : Runner {
-	$runner = WP_CLI::get_runner();
-	if ( ! $runner instanceof Runner ) {
-		$runner = new Runner();
-	}
-	return $runner;
-}
 
 /**
  * Open a system file or URL.
@@ -31,7 +18,7 @@ function open( string $uri ) : bool {
 }
 
 /**
- * Filter or sanitize a command argument (accepts int, float, or string).
+ * Filter or sanitize a command argument (accepts int, float, string, or array).
  */
 function esc_arg( mixed $arg ) : ?string {
 	if ( \is_int( $arg ) || \is_float( $arg ) ) {
@@ -40,6 +27,19 @@ function esc_arg( mixed $arg ) : ?string {
 
 	if ( \is_string( $arg ) ) {
 		return \escapeshellarg( $arg );
+	}
+
+	if ( \is_array( $arg ) ) {
+		$args = \array_map(
+			fn ( $arg ) => esc_arg( $arg ),
+			$arg
+		);
+
+		$args = \array_filter( $args, fn ( $arg ) => $arg !== null );
+
+		if ( $args ) {
+			return \implode( ' ', $args );
+		}
 	}
 
 	return null;

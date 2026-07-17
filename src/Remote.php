@@ -2,6 +2,7 @@
 
 namespace WP_CLI;
 
+use WP_CLI;
 use WP_CLI\Iterators\Exception;
 
 /**
@@ -19,7 +20,7 @@ abstract class Remote extends Commander {
 			$args = [];
 
 		} elseif ( \preg_match( '#' . Configurator::ALIAS_REGEX . '#', $name ) ) {
-			$args = Utils\get_runner()->aliases[ $name ] ?? null;
+			$args = WP_CLI::get_runner()->aliases[ $name ] ?? null;
 
 			if ( ! \is_array( $args ) ) {
 				throw new Exception( "Alias '$name' not found." );
@@ -43,39 +44,49 @@ abstract class Remote extends Commander {
 		$ssh = $args['ssh'] ?? null;
 
 		if ( \is_string( $ssh ) ) {
-			// Accept user@hostname:path syntax like scp & rsync
-			// WP-CLI only recognises absolute paths e.g. user@hostname/path
+			// Accept user@host:path syntax without path needing to be absolute (WP-CLI only matches /)
 			if ( \preg_match( '/:([^\d:][^:]*)/', $ssh, $matches ) ) {
 				$ssh = \str_replace( $matches[0], '', $ssh );
+
 				$args['path'] = $matches[1];
 			}
 
 			$args += Utils\parse_ssh_url( $ssh );
 
 			$args['scheme'] ??= 'ssh';
-
-			unset( $args['ssh'] );
 		}
 
-		$scheme = $args['scheme'] ??= 'local';
+		$scheme = $args['scheme'] ?? 'local';
 
 		$class = self::class . '\\' . \ucwords( \strtolower( \str_replace( '-', '_', $scheme ) ), '_' );
 
-		if ( ! \is_subclass_of( $class, self::class ) ) {
+		if ( ! \class_exists( $class ) || ! \is_subclass_of( $class, self::class ) ) {
 			throw new Exception( "Unsupported scheme '$scheme'." );
 		}
 
 		$args['name'] = $name;
 
-		if ( \is_array( $defaults ) ) {
-			$args += $defaults;
-
-		} elseif ( $defaults instanceof Commander ) {
-			$args['debug'] ??= $defaults->debug;
-			$args['mode'] ??= $defaults->mode;
+		if ( $defaults instanceof Commander ) {
+			$defaults = \get_object_vars( $defaults );
 		}
 
-		return new $class( $args );
+		if ( \is_array( $defaults ) ) {
+			$args += $defaults;
+		}
+
+		$props = [];
+
+		$class = new \ReflectionClass( $class );
+
+		foreach ( $class->getConstructor()->getParameters() as $param ) {
+			if ( isset( $args[ $param->name ] ) ) {
+				$props[ $param->name ] = $args[ $param->name ];
+			} elseif ( ! $param->isOptional() ) {
+				throw new Exception( "$$param->name is required." );
+			}
+		}
+
+		return $class->newInstance( ...$props );
 	}
 
 	/**
@@ -84,13 +95,13 @@ abstract class Remote extends Commander {
 	 * @return Remote[]
 	 */
 	public static function resolve( string | array | null $name, array | Commander | null $defaults = null ) : array {
-		$aliases = Utils\get_runner()->aliases;
+		$aliases = WP_CLI::get_runner()->aliases;
 
 		unset( $aliases['@all'] );
 
 		$aliases['@all'] = \array_keys( $aliases );
 
-		$resolve = static function ( $name ) use ( $aliases, &$resolve ) {
+		$resolve = static function ( $name ) use ( $aliases, &$resolve ) : array {
 			if ( ! \is_array( $name ) ) {
 				$alias = $aliases[ $name ] ?? null;
 
@@ -113,14 +124,15 @@ abstract class Remote extends Commander {
 		return $remotes;
 	}
 
-	public ?string $name = null;
-	public ?string $path = null;
-	public ?string $home = null;
-	public ?string $url = null;
-
-	public function __construct( array $props = [] ) {
-		parent::__construct( $props );
-
+	public function __construct(
+		public ?string $name = null,
+		public ?string $path = null,
+		public ?string $home = null,
+		public ?string $url = null,
+		public int     $mode = Shell::THROW,
+		public ?string $debug = null,
+		public ?array  $wp_config = null
+	) {
 		$this->wp_config ??= $this->is_self() ? null : \array_filter([
 			'path' => $this->path,
 			'url' => $this->url,
