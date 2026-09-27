@@ -6,48 +6,48 @@ use WP_CLI;
 use WP_CLI\Utils;
 
 /**
- * Universal API for both system and WP-CLI commands.
+ * Universal API for system and WP-CLI commands.
  */
 class Commander {
 
 	public function __construct(
-		public int     $mode = Shell::THROW,
+		/**
+		 * Group debug messages (default none).
+		 */
 		public ?string $debug = null,
-		public ?array  $wp_config = null
+
+		/**
+		 * Runtime arguments for WP-CLI (default inherited).
+		 */
+		public ?array $wp = null
 	) {}
 
-	public function sh( string $cmd, string | array ...$args ) : Shell {
-		return new Shell(
-			command: $cmd,
-			args: $args,
-			debug: $this->debug,
-			mode: $this->mode,
-		);
+	public function get_wp_args() : array {
+		return $this->wp ?? WP_CLI::get_runner()->runtime_config;
 	}
 
-	public function wp( string $cmd, string | array ...$args ) : Shell {
+	public function wp( string $cmd, mixed ...$args ) : Shell {
 		global $argv;
 
 		$wp = Utils\esc_cmd( '%s %s', Utils\get_php_binary(), $argv[0] );
-		$wp .= Utils\options_to_str( $this->wp_config ?? WP_CLI::get_runner()->runtime_config );
 
-		$cmd .= Utils\args_to_cmd( $args );
+		$cmd = "$wp $cmd";
 
-		return $this->sh( "$wp $cmd" );
+		$args = $this->get_wp_args() + $args;
+
+		return Shell::create(
+			command: $cmd,
+			args: $args,
+			debug: $this->debug,
+			negate: true
+		);
 	}
 
-	public function rsync( string $src, string $dest, array $options = [] ) : Shell {
-		$options += [
-			'perms' => true,
-			'times' => true,
-			'recursive' => true,
-		];
-
-		return new Shell(
-			command: 'rsync',
-			args: [ $options, $src, $dest ],
-			debug: $this->debug,
-			mode: $this->mode,
+	public function sh( string $cmd, mixed ...$args ) : Shell {
+		return Shell::create(
+			command: $cmd,
+			args: $args,
+			debug: $this->debug
 		);
 	}
 

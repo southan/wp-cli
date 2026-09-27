@@ -5,13 +5,21 @@ Extension pack for developing with WP-CLI & remote WordPress.
 
 ## Fluent shell API
 
-Easily compose and handle system commands.
+Compose and handle system commands.
 
 ```php
 $zip = new WP_CLI\Shell( 'zip' );
 
-// Add command options & arguments
 $zip->add( [ 'recurse-paths' => true, '-q' => true ], 'archive.zip', '.' );
+
+// ...or one-liner
+$zip = WP_CLI\Shell::create( 'zip', [
+    [ 'recurse-paths' => true, '-q' => true ],
+    'archive.zip',
+    '.',
+] );
+
+echo $zip; // zip --recurse-paths -q 'archive.zip' '.'
 
 // Set working directory
 $zip->cwd( __DIR__ . '/src' );
@@ -21,39 +29,44 @@ $zip->env([
     'ZIPOPT' => '-D',
 ]);
 
-// Exit on failure
-$zip->fail();
-
-// Throw exception on failure
-$zip->throw();
-
-// Print warning on failure
-$zip->warn();
-
 // Chainable
-$zip->add( 'archive.zip', '.' )
+$zip->add( [ 'recurse-paths' => true, '-q' => true ], 'archive.zip', '.' )
     ->cwd( __DIR__ . '/src' )
     ->env([
         'ZIPOPT' => '-FS'
-    ])
-    ->fail();
+    ]);
 
-// Get command output
-$out = $zip->get();
+// Get command output (stdout) (throws exception on error outside allow)
+$out = $zip->allow( 12 )->get();
 
-// Get command error output
+// Get command output (ignore error)
+$out = $zip->get( check: false );
+
+// Get command error (stderr)
 $error = $zip->get_error();
 
-// Stream command output instead (non-capturing)
-$zip->stream();
+// Non-capturing, stdout/stderr will be null (throws exception on error outside allow)
+$zip->allow( 12 )->stream();
 
 // Command exit code was zero
-$is_ok = $zip->is_ok();
+$success = $zip->success();
+
+// Command exit code > zero
+$failed = $zip->failed();
 
 // Check command exit code
-if ( $shell->is( 12 ) ) {
+if ( $zip->is( 12 ) ) {
     WP_CLI::warning( 'Nothing to ZIP.' );
 }
+
+// Support debugging in WP-CLI with --debug or --debug=my-group
+$zip = WP_CLI\Shell::create( 'zip', debug: 'my-group' );
+
+// Parse JSON
+$data = WP_CLI\Shell::create( 'curl', 'https://example/data.json' )->parse_json();
+
+// Parse list
+$contents = WP_CLI\Shell::create( 'ls', '.' )->parse_list( "\t" );
 ```
 
 ## Commander
@@ -65,11 +78,8 @@ $commander = new WP_CLI\Commander(
     // Set debug group for all commands
     debug: 'my_debug',
 
-    // Set default failure mode (default THROW)
-    mode: WP_CLI\Shell::EXIT,
-
     // Set WP-CLI runtime config (default is current runtime)
-    wp_config: [
+    wp: [
         'path' => '/path/to/another/wordpress',
     ],
 );
@@ -105,13 +115,10 @@ $remotes = WP_CLI\Remote::resolve( '@both' );
 A remote (control) is an extended `Commander` instance but with some additional methods specific to WordPress.
 
 ```php
-// Get remote WordPress path (returns path as-is if configured)
-$path = $remote->path();
+// Get WordPress absolute path
+$path = $remote->get_path();
 
-// Get remote WordPress realpath (always execs WP)
-$realpath = $remote->get_path();
-
-// Get remote WordPress URL
+// Get WordPress URL
 $url = $remote->get_url();
 
 // Get remote WordPress constant
@@ -129,18 +136,20 @@ $remote->is_dir( 'foo/' );
 $remote->mkdir( 'foo' );
 $remote->unlink( 'foo.txt' );
 $remote->file_put_contents( 'foo.txt', 'Foo' );
+$remote->copy( 'foo.txt', 'bar.txt' );
 
-// Copy file from local filesystem to remote
-$remote->copy( 'foo.txt', "$remote:foo.txt" );
+// Copy from current filesystem to remote
+$remote->copy_from( 'foo.txt' );
 
-// Copy file from remote to local filesystem
-$remote->copy( "$remote:foo.txt", 'foo.txt' );
+// Copy from remote to current filesystem
+$remote->copy_to( 'foo.txt', 'foo.txt' );
 
-// Sync local directory to remote
-$remote->rsync( "foo/", "$remote:foo/" )->stream();
+// ... or more logically
+$remote->locate( 'foo.txt' )->copy_to( 'foo.txt' );
 
-// Sync remote directory to local
-$remote->rsync( "$remote:foo/", 'foo/' )->stream();
+// Same API for move e.g.
+$remote->move_from( 'foo/' );
+
 ```
 
 ## MU Plugin

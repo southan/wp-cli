@@ -2,6 +2,8 @@
 
 namespace WP_CLI\Utils;
 
+use WP_CLI\Exception;
+use WP_CLI\Extractor;
 use WP_CLI\Process;
 
 /**
@@ -18,24 +20,21 @@ function open( string $uri ) : bool {
 }
 
 /**
- * Filter or sanitize a command argument (accepts int, float, string, or array).
+ * Sanitize a command argument.
  */
 function esc_arg( mixed $arg ) : ?string {
-	if ( \is_int( $arg ) || \is_float( $arg ) ) {
+	if ( \is_string( $arg ) || \is_float( $arg ) ) {
+		return \escapeshellarg( (string) $arg );
+	}
+
+	if ( \is_int( $arg ) ) {
 		return (string) $arg;
 	}
 
-	if ( \is_string( $arg ) ) {
-		return \escapeshellarg( $arg );
-	}
-
 	if ( \is_array( $arg ) ) {
-		$args = \array_map(
-			fn ( $arg ) => esc_arg( $arg ),
-			$arg
-		);
+		$args = \array_map( fn ( $arg ) => esc_arg( $arg ), $arg );
 
-		$args = \array_filter( $args, fn ( $arg ) => $arg !== null );
+		$args = \array_filter( $args, static fn ( mixed $arg ) => $arg !== null );
 
 		if ( $args ) {
 			return \implode( ' ', $args );
@@ -47,65 +46,42 @@ function esc_arg( mixed $arg ) : ?string {
 
 /**
  * Generate command string.
- *
- * Nested arrays & values with associative keys are parsed with options_to_str().
  */
 function args_to_cmd( array $args, bool $negate = true ) : string {
 	$cmd = '';
 
 	foreach ( $args as $key => $arg ) {
 		if ( \is_string( $key ) ) {
-			$cmd .= options_to_str( [ $key => $arg ], $negate );
+			$is_flag = \str_starts_with( $key, '-' );
+
+			if ( $arg === true ) {
+				$cmd .= $is_flag ? " $key" : " --$key";
+
+			} elseif ( $arg === false ) {
+				if ( $negate && ! $is_flag ) $cmd .= " --no-$key";
+
+			} elseif ( \is_scalar( $arg ) ) {
+				$cmd .= ' ' . \sprintf( $is_flag ? '%s %s' : '--%s=%s', $key, esc_arg( $arg ) );
+
+			} elseif ( \is_array( $arg ) ) {
+				foreach ( $arg as $value ) {
+					$cmd .= args_to_cmd( [ $key => $value ], $negate );
+				}
+			}
+
 		} elseif ( \is_array( $arg ) ) {
-			$cmd .= options_to_str( $arg, $negate );
-		} elseif ( \is_scalar( $arg ) ) {
-			$cmd .= ' ' . \escapeshellarg( (string) $arg );
+			$cmd .= args_to_cmd( $arg, $negate );
+
+		} else {
+			$arg = esc_arg( $arg );
+
+			if ( $arg !== null ) {
+				$cmd .= " $arg";
+			}
 		}
 	}
 
 	return $cmd;
-}
-
-/**
- * Generate command options string from associative array.
- *
- * Unlike assoc_args_to_str() this function filters out non-scalar values and
- * generates flags syntax for keys prefixed with '-'.
- */
-function options_to_str( array $options, bool $negate = true ) : string {
-	$str = '';
-
-	foreach ( $options as $key => $value ) {
-		if ( ! \is_string( $key ) ) {
-			$arg = esc_arg( $value );
-			if ( $arg !== null ) {
-				$str .= " $arg";
-			}
-			continue;
-		}
-
-		$is_flag = $key[0] === '-';
-
-		if ( $value === true ) {
-			$str .= $is_flag ? " $key" : " --$key";
-
-		} elseif ( $value === false ) {
-			if ( $negate && ! $is_flag ) $str .= " --no-$key";
-
-		} elseif ( \is_string( $value ) ) {
-			$str .= ' ' . \sprintf( $is_flag ? '%s %s' : '--%s=%s', $key, \escapeshellarg( $value ) );
-
-		} elseif ( \is_int( $value ) || \is_float( $value ) ) {
-			$str .= ' ' . \sprintf( $is_flag ? '%s %s' : '--%s=%s', $key, $value );
-
-		} elseif ( \is_array( $value ) ) {
-			foreach ( $value as $v ) {
-				$str .= options_to_str( [ $key => $v ], $negate );
-			}
-		}
-	}
-
-	return $str;
 }
 
 /**
@@ -125,18 +101,138 @@ function parse_list( mixed $list, mixed $separator = ',' ) : array {
 
 	} else {
 		if ( \is_object( $list ) ) {
-			$list = \is_iterable( $list ) ? \iterator_to_array( $list, false ) : \get_object_vars( $list );
+			$list = \is_iterable( $list ) ? \iterator_to_array( $list ) : \get_object_vars( $list );
 
 		} elseif ( ! \is_array( $list ) ) {
 			return [];
 		}
 
-		$list = \array_filter( $list, 'is_string' );
+		$list = \array_filter( $list, 'is_scalar' );
 	}
 
-	$list = \array_map( 'trim', $list );
-	$list = \array_filter( $list, fn ( $line ) => \strlen( $line ) > 0 );
+	$list = \array_map( static function ( $item ) {
+		if ( \is_bool( $item ) ) {
+			return null;
+		}
+
+		$item = \trim( (string) $item );
+
+		if ( ! \strlen( $item ) ) {
+			return null;
+		}
+
+		return $item;
+	}, $list );
+
+	$list = \array_filter( $list, static fn ( mixed $arg ) => $arg !== null );
+
 	$list = \array_values( $list );
 
 	return $list;
+}
+
+/**
+ * Removes trailing forward slashes and backslashes if they exist.
+ */
+function untrailingslashit( mixed $string ) : string {
+	if ( ! \is_string( $string ) ) {
+		return '';
+	}
+
+	return \rtrim( $string, '/\\' );
+}
+
+/**
+ * Normalise and canonise a path.
+ */
+function canonical_path( mixed $path, bool $resolve = true ) : string {
+	if ( ! \is_string( $path ) ) {
+		return '';
+	}
+
+	if ( $resolve ) {
+		$realpath = \realpath( $path );
+
+		if ( $realpath !== false ) {
+			$path = $realpath;
+		}
+	}
+
+	$path = normalize_path( $path );
+
+	$path = untrailingslashit( $path );
+
+	return $path;
+}
+
+/**
+ * Joins two filesystem paths together.
+ *
+ * For example, 'give me $path relative to $base'. If the $path is absolute,
+ * then it the full path is returned.
+ */
+function path_join( string $base, string $path ) : string {
+	if ( is_path_absolute( $path ) ) {
+		return $path;
+	}
+
+	return untrailingslashit( $base ) . '/' . \ltrim( $path, '/\\' );
+}
+
+/**
+ * Create a new temporary file that self-removes on shutdown.
+ *
+ * @throws Exception if fails to create file.
+ */
+function temp_file( ?string $prefix = null ) : string {
+	$temp_dir = get_temp_dir();
+
+	if ( ! \is_writable( $temp_dir ) ) {
+		throw new Exception();
+	}
+
+	$file = \tempnam( $temp_dir, $prefix ?? 'wp-cli-' );
+
+	if ( ! \is_string( $file ) ) {
+		throw new Exception( "Failed to create temporary file in '$temp_dir'." );
+	}
+
+	\register_shutdown_function( static function () use ( $file ) {
+		if ( \is_file( $file ) ) {
+			@\unlink( $file );
+		}
+	});
+
+	return $file;
+}
+
+/**
+ * Create a new temporary directory that self-removes on shutdown.
+ *
+ * @throws Exception if fails to create directory.
+ */
+function temp_dir( ?string $prefix = null ) : string {
+	$temp_dir = get_temp_dir();
+
+	if ( ! \is_writable( $temp_dir ) ) {
+		throw new Exception();
+	}
+
+	do {
+		$dir = $temp_dir . \uniqid( $prefix ?? 'wp-cli-' );
+	} while (
+		\file_exists( $dir )
+	);
+
+	if ( ! \mkdir( $dir, recursive: true ) ) {
+		throw new Exception( "Failed to create temporary directory '$dir'." );
+	}
+
+	\register_shutdown_function( static function () use ( $dir ) {
+		if ( \is_dir( $dir ) ) {
+			Extractor::rmdir( $dir );
+		}
+	});
+
+	return $dir;
 }

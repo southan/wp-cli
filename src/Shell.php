@@ -3,27 +3,19 @@
 namespace WP_CLI;
 
 use WP_CLI;
-use WP_CLI\Iterators\Exception;
 
 /**
- * Fluent shell API for running system commands.
+ * Fluent API for running system commands.
  */
 class Shell {
 
-	const EXIT  = 1;
-	const THROW = 2;
-	const WARN  = 3;
+	public ?string $debug = null;
+	public bool    $negate = false;
+	public array   $allow = [];
 
 	private ProcessRun $result;
 
-	public function __construct(
-		string | ProcessRun $command,
-		array $args = [],
-		public  ?string $debug = null,
-		private int     $mode = 0,
-		private array   $accept = [],
-		private bool    $stream = false
-	) {
+	public function __construct( string | ProcessRun $command ) {
 		if ( ! $command instanceof ProcessRun ) {
 			$command = new ProcessRun([
 				'command' => $command,
@@ -31,14 +23,28 @@ class Shell {
 		}
 
 		$this->result = $command;
-
-		if ( $args ) {
-			$this->result->command .= Utils\args_to_cmd( $args, negate: false );
-		}
 	}
 
 	public function __toString() : string {
 		return $this->result->command;
+	}
+
+	public static function create(
+		string | ProcessRun $command,
+		string | array $args = [],
+		?string $debug = null,
+		bool    $negate = false,
+	) : self {
+		$shell = new self( $command );
+
+		$shell->debug = $debug;
+		$shell->negate = $negate;
+
+		if ( $args !== [] ) {
+			$shell->add( $args );
+		}
+
+		return $shell;
 	}
 
 	/**
@@ -46,8 +52,8 @@ class Shell {
 	 *
 	 * @see Utils\args_to_cmd()
 	 */
-	public function add( string | array ...$args ) : self {
-		$this->result->command .= Utils\args_to_cmd( $args, negate: false );
+	public function add( mixed ...$args ) : self {
+		$this->result->command .= Utils\args_to_cmd( $args, $this->negate );
 
 		return $this;
 	}
@@ -55,8 +61,8 @@ class Shell {
 	/**
 	 * Add unescaped arguments to the current command.
 	 */
-	public function add_raw( string | array ...$args ) : self {
-		$args = implode( ' ', Utils\parse_list( $args, null ) );
+	public function add_raw( mixed ...$args ) : self {
+		$args = implode( ' ', Utils\parse_list( $args ) );
 
 		if ( \strlen( $args ) ) {
 			$this->result->command .= " $args";
@@ -88,72 +94,24 @@ class Shell {
 	}
 
 	/**
-	 * Set exit codes that will not be considered failure errors.
+	 * Set exit codes that will not be considered failure.
 	 */
-	public function accept( int ...$codes ) : self {
-		$this->accept = \array_values( \array_unique( \array_merge( $this->accept, $codes ) ) );
+	public function allow( int ...$codes ) : self {
+		$this->allow = \array_values( \array_unique( \array_merge( $this->allow, $codes ) ) );
 
 		return $this;
 	}
 
 	/**
-	 * Set failure mode & check result (if command has run).
+	 * Check command result.
+	 *
+	 * @throws Exception on exit code outside allow boundaries.
 	 */
-	public function mode( int $mode ) : self {
-		$this->mode = $mode;
+	public function check() : self  {
+		$code = $this->get_code();
 
-		return $this->check();
-	}
-
-	/**
-	 * Exit if command fails.
-	 */
-	public function fail() : self {
-		return $this->mode( self::EXIT );
-	}
-
-	/**
-	 * Throw exception if command fails.
-	 */
-	public function throw() : self {
-		return $this->mode( self::THROW );
-	}
-
-	/**
-	 * Print warning if command fails.
-	 */
-	public function warn() : self {
-		return $this->mode( self::WARN );
-	}
-
-	/**
-	 * Check command result (if command has run).
-	 */
-	public function check( ?int $mode = null ) : self  {
-		$code = $this->result->return_code;
-
-		if ( ! $code || \in_array( $code, $this->accept, true ) ) {
-			return $this;
-		}
-
-		$error = (string) $this->result->stderr;
-
-		if ( \str_starts_with( $error, 'Error: ' ) ) {
-			$error = \substr( $error, \strlen( 'Error: ' ) );
-		}
-
-		$mode ??= $this->mode;
-
-		if ( $mode === self::EXIT ) {
-			WP_CLI::error( $error, $code >= 1 ? $code : true );
-		}
-
-		if ( $mode === self::THROW ) {
-			throw new Exception( $error, $code );
-		}
-
-		if ( $mode === self::WARN ) {
-			WP_CLI::error( $error, false );
+		if ( $code && ! \in_array( $code, $this->allow, true ) ) {
+			throw new Exception( (string) $this->get_error(), $code );
 		}
 
 		return $this;
@@ -162,7 +120,7 @@ class Shell {
 	/**
 	 * Run the command.
 	 */
-	public function run() : self {
+	public function run( bool $stream = false ) : self {
 		Utils\check_proc_available();
 
 		$result = $this->result;
@@ -175,8 +133,8 @@ class Shell {
 
 		$descriptors = [
 			0 => \STDIN,
-			1 => $this->stream ? \STDOUT : [ 'pipe', 'w' ],
-			2 => $this->stream ? \STDERR : [ 'pipe', 'w' ],
+			1 => $stream ? \STDOUT : [ 'pipe', 'w' ],
+			2 => $stream ? \STDERR : [ 'pipe', 'w' ],
 		];
 
 		$pipes = [];
@@ -185,16 +143,16 @@ class Shell {
 
 		$proc = Utils\proc_open_compat( $result->command, $descriptors, $pipes, $result->cwd, $result->env );
 
-		if ( ! $proc ) {
-			WP_CLI::error( 'Failed to open process.' );
-		}
-
-		if ( ! $this->stream ) {
+		if ( ! $stream ) {
 			$result->stdout = \trim( (string) \stream_get_contents( $pipes[1] ) );
 			\fclose( $pipes[1] );
 
 			$result->stderr = \trim( (string) \stream_get_contents( $pipes[2] ) );
 			\fclose( $pipes[2] );
+
+			if ( \str_starts_with( $result->stderr, 'Error: ' ) ) {
+				$result->stderr = \substr( $result->stderr, 7 );
+			}
 		}
 
 		$result->return_code = \proc_close( $proc );
@@ -214,41 +172,73 @@ class Shell {
 			$this->debug ?? false
 		);
 
-		return $this->check();
+		return $this;
 	}
 
 	/**
 	 * Stream the command instead of capturing the output.
-	 *
-	 * Note that get() will return empty for streamed commands.
 	 */
 	public function stream() : self {
-		$this->stream = true;
-
-		return $this->run();
+		return $this->run( true )->check();
 	}
 
 	/**
-	 * Check command exit code (runs command if not already).
+	 * Check command exit code.
 	 */
 	public function is( int ...$codes ) : bool {
 		return \in_array( $this->get_code(), $codes, true );
 	}
 
-	/**
-	 * Check command exit code is zero (runs command if not already)
-	 */
-	public function is_ok() : bool {
+	public function success() : bool {
 		return $this->get_code() === 0;
+	}
+
+	public function failed() : bool {
+		return ! $this->success();
 	}
 	
 	/**
-	 * Get command result as ProcessRun (runs command if not already).
+	 * Get command stdout.
+	 *
+	 * @throws Exception on exit code outside allow boundaries.
+	 */
+	public function get( bool $check = true ) : ?string {
+		$result = $this->get_result();
+
+		$check && $this->check();
+
+		return $result->stdout;
+	}
+
+	/**
+	 * Get command stderr.
+	 */
+	public function get_error() : ?string {
+		$error = $this->get_result()->stderr;
+
+		if ( \str_starts_with( "$error", 'Error: ' ) ) {
+			$error = \substr( $error, 7 );
+		}
+
+		return $error;
+	}
+
+	/**
+	 * Get command exit code.
+	 */
+	public function get_code() : int {
+		return $this->get_result()->return_code;
+	}
+
+	/**
+	 * Get command result as ProcessRun.
 	 */
 	public function get_result() : ProcessRun {
 		$result = $this->result;
 
 		if ( $result->return_code === null ) {
+			$result->return_code = -1;
+
 			$this->run();
 		}
 
@@ -256,42 +246,30 @@ class Shell {
 	}
 
 	/**
-	 * Get command exit code (runs command if not already).
-	 */
-	public function get_code() : int {
-		return $this->get_result()->return_code;
-	}
-
-	/**
-	 * Get command stderr (runs command if not already).
-	 */
-	public function get_error() : ?string {
-		return $this->get_result()->stderr;
-	}
-
-	/**
-	 * Get command stdout (runs command if not already).
-	 */
-	public function get() : ?string {
-		return $this->get_result()->stdout;
-	}
-
-	/**
-	 * Parse command stdout as JSON (runs command if not already).
+	 * Parse command stdout as JSON.
+	 *
+	 * @throws Exception on exit code outside allow boundaries or if stdout is malformed/not JSON.
 	 */
 	public function parse_json() : mixed {
 		$out = $this->get();
-		if ( $out === null ) {
+
+		if ( $out === null || $out === '' ) {
 			return null;
 		}
-		if ( $out === '' ) {
-			return false;
+
+		$result = \json_decode( $out, true );
+
+		if ( \json_last_error() !== \JSON_ERROR_NONE ) {
+			throw new Exception( json_last_error_msg(), \json_last_error() );
 		}
-		return \json_decode( $out, true, flags: \JSON_THROW_ON_ERROR );
+
+		return $result;
 	}
 
 	/**
-	 * Parse command stdout as list (runs command if not already).
+	 * Parse command stdout as list.
+	 *
+	 * @throws Exception on exit code outside allow boundaries.
 	 *
 	 * @return string[]
 	 */

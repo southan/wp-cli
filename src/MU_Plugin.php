@@ -6,14 +6,14 @@ use WP_CLI\Remote;
 
 class MU_Plugin {
 
-	public string $name;
-	public string $slug;
-	public string $description;
-
-	public function __construct( string $name, string $description = '', string $slug = '' ) {
-		$this->name        = $name;
-		$this->slug        = $slug ?: (string) \preg_replace( '/[^a-z_]+/', '-', \strtolower( $name ) );
-		$this->description = $description;
+	public function __construct(
+		public string $name,
+		public string $slug = '',
+		public string $description = ''
+	) {
+		if ( $this->slug === '' ) {
+			$this->slug = (string) \preg_replace( '/[^a-z_]+/', '-', \strtolower( $this->name ) );
+		}
 	}
 	
 	public function generate( string $code ) : string {

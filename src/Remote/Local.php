@@ -3,113 +3,254 @@
 namespace WP_CLI\Remote;
 
 use WP_CLI;
+use WP_CLI\Exception;
+use WP_CLI\Location;
 use WP_CLI\Remote;
 use WP_CLI\Utils;
 
 class Local extends Remote {
 
-	public function __toString() : string {
-		return $this->is_self() ? 'this site' : "$this->name";
-	}
+	public function uri( ?string $path = null ) : string {
+		if ( $path ) {
+			$path = Utils\canonical_path( $path );
+		}
 
-	public function is_local() : bool {
-		return true;
+		$path ??= $this->get_path();
+
+		return "local://$path";
 	}
 
 	public function is_self() : bool {
-		return \realpath( \ABSPATH ) === $this->get_path();
-	}
-
-	public function get_home() : string {
-		return Utils\get_home_dir();
+		return $this->path === null || $this->path === \ABSPATH || Utils\canonical_path( \ABSPATH ) === $this->get_path();
 	}
 
 	public function get_path() : string {
-		$path = \realpath( $this->path ?? \ABSPATH );
-		if ( $path === false ) {
-			$path = $this->path ?? \ABSPATH;
-		}
-		return $path;
+		return Utils\canonical_path( $this->path ?? \ABSPATH );
+	}
+
+	public function get_wp_args() : array {
+		return $this->wp ?? $this->is_self() ? WP_CLI::get_runner()->runtime_config : \array_filter([
+			'path' => $this->path,
+			'url' => $this->url,
+		]);
 	}
 
 	public function get_const( string $name ) : mixed {
-		if ( ! $this->is_self() || ! \defined( $name ) ) {
-			return parent::get_const( $name );
+		if ( \defined( $name ) && $this->is_self() ) {
+			return \constant( $name );
 		}
 
-		return \constant( $name );
+		return parent::get_const( $name );
 	}
 
 	public function get_option( string $name ) : mixed {
-		if ( ! $this->is_self() || ! \function_exists( 'get_option' ) ) {
-			return parent::get_option( $name );
+		if ( \function_exists( 'get_option' ) && $this->is_self() ) {
+			return \get_option( $name );
 		}
 
-		return \get_option( $name );
+		return parent::get_option( $name );
 	}
 
-	public function get_content_dir() : ?string {
-		if ( ! $this->is_self() || ! \defined( 'WP_CONTENT_DIR' ) ) {
-			return parent::get_content_dir();
+	public function get_content_dir() : string {
+		if ( \defined( 'WP_CONTENT_DIR' ) && $this->is_self() ) {
+			return Utils\canonical_path( \WP_CONTENT_DIR );
 		}
 
-		return \realpath( \WP_CONTENT_DIR ) ?: null;
+		return parent::get_content_dir();
 	}
 
-	public function get_plugins_dir() : ?string {
-		if ( ! $this->is_self() || ! \defined( 'WP_PLUGIN_DIR' ) ) {
-			return parent::get_plugins_dir();
+	public function get_plugins_dir() : string {
+		if ( \defined( 'WP_PLUGIN_DIR' ) && $this->is_self() ) {
+			return Utils\canonical_path( \WP_PLUGIN_DIR );
 		}
 
-		return \realpath( \WP_PLUGIN_DIR ) ?: null;
+		return parent::get_plugins_dir();
 	}
 
-	public function get_mu_plugins_dir() : ?string {
-		if ( ! $this->is_self() || ! \defined( 'WPMU_PLUGIN_DIR' ) ) {
-			return parent::get_mu_plugins_dir();
+	public function get_mu_plugins_dir() : string {
+		if ( \defined( 'WPMU_PLUGIN_DIR' ) && $this->is_self() ) {
+			return Utils\canonical_path( \WPMU_PLUGIN_DIR );
 		}
 
-		return \realpath( \WPMU_PLUGIN_DIR ) ?: null;
+		return parent::get_mu_plugins_dir();;
 	}
 
-	public function get_themes_dir() : ?string {
-		if ( ! $this->is_self() || ! \defined( 'WP_CONTENT_DIR' ) ) {
-			return parent::get_themes_dir();
+	public function get_themes_dir() : string {
+		if ( \defined( 'WP_CONTENT_DIR' ) && $this->is_self() ) {
+			return Utils\canonical_path( \WP_CONTENT_DIR . '/themes' );
 		}
 
-		return \realpath( \WP_CONTENT_DIR . '/themes' ) ?: null;
+		return parent::get_themes_dir();
 	}
 
-	public function get_uploads_dir() : ?string {
-		if ( ! $this->is_self() || ! \function_exists( 'wp_upload_dir' ) ) {
-			return parent::get_uploads_dir();
+	public function get_uploads_dir() : string {
+		if ( \function_exists( 'wp_get_upload_dir' ) && $this->is_self() ) {
+			return Utils\canonical_path( \wp_upload_dir( null, false )['basedir'] );
 		}
 
-		$uploads = \wp_upload_dir();
+		return parent::get_uploads_dir();
+	}
 
-		if ( ! empty( $uploads['error']  ) ) {
-			WP_CLI::warning( $uploads['error'] );
+	public function copy( string $from, string | Location | Remote $to, array $options = [] ) : Location {
+		if ( ! $this->file_exists( $from ) ) {
+			throw new Exception( "'$from' does not exist." );
 		}
 
-		$dir = $uploads['basedir'] ?? null;
+		$from = $this->locate( $from );
 
-		if ( \is_string( $dir ) ) {
-			$dir = \realpath( $dir );
+		$to = Location::from( $to, $this );
 
-			if ( $dir ) {
-				return $dir;
+		if ( ! $to->is_local() ) {
+			return $to->copy_from( $from, $options );
+		}
+
+		$to->path ??= $from->path;
+
+		$from_path = Utils\canonical_path( $from->path );
+
+		$to_path = Utils\canonical_path( $to->path );
+
+		if ( $from_path === $to_path ) {
+			return $to;
+		}
+
+		$delete = ! empty( $options['delete'] );
+
+		if ( \is_file( $from_path ) ) {
+			if ( ! \copy( $from_path, $to_path ) ) {
+				throw new Exception( "Failed to copy '$from' to '$to'." );
+			}
+
+			if ( $delete ) {
+				$this->unlink( $from_path );
+			}
+
+			return $to;
+		}
+
+		if ( ! \is_dir( $from_path ) ) {
+			throw new Exception( "Cannot copy '$from' - not a file or directory." );
+		}
+
+		if ( ! $this->mkdir( $to_path ) ) {
+			throw new Exception( "Failed to create directory '$to'." );
+		}
+
+		$exclude = \array_map(
+			static function ( string $path ) use ( $from_path ) {
+				$path = Utils\normalize_path( $path );
+
+				if ( \str_starts_with( $path, "$from_path/" ) ) {
+					$path = \substr( $path, \strlen( $from_path ) );
+				}
+
+				$pattern = \strtr( \preg_quote( $path, '!' ), [
+					'\*\*' => '.*',
+					'\*' => '[^/]*',
+					'\?' => '[^/]',
+					'\[' => '[',
+					'\]' => ']',
+				]);
+
+				if ( \str_starts_with( $pattern, '/' ) ) {
+					$pattern = "^$pattern";
+				} else {
+					$pattern = "/$pattern";
+				}
+
+				return "!$pattern(/|$)!";
+			},
+			Utils\parse_list( $options['exclude'] ?? [], false )
+		);
+
+		$dir = new \RecursiveIteratorIterator(
+			new \RecursiveCallbackFilterIterator(
+				new \RecursiveDirectoryIterator(
+					$from_path,
+					\RecursiveDirectoryIterator::SKIP_DOTS | \RecursiveDirectoryIterator::CURRENT_AS_SELF
+				),
+				static function ( \RecursiveDirectoryIterator $file ) use ( $exclude ) : bool {
+					$path = Utils\normalize_path( '/' . $file->getSubPathname() );
+
+					foreach ( $exclude as $pattern ) {
+						if ( \preg_match( $pattern, $path ) ) {
+							return false;
+						}
+					}
+
+					return true;
+				}
+			),
+			\RecursiveIteratorIterator::SELF_FIRST
+		);
+
+		$to_delete = [];
+
+		/** @var \RecursiveDirectoryIterator $file */
+		foreach ( $dir as $file ) {
+			$rel_path = $file->getSubPathname();
+
+			$src_path = $file->getPathname();
+
+			$dest_path = "$to_path/$rel_path";
+
+			if ( $file->isDir() ) {
+				if ( ! $this->mkdir( $dest_path ) ) {
+					throw new Exception( "Failed to create '$dest_path'." );
+				}
+
+			} elseif ( $file->isFile() ) {
+				if ( ! \copy( $src_path, $dest_path ) ) {
+					throw new Exception( "Failed to copy '$src_path' to '$dest_path'." );
+				}
+
+			} else {
+				continue;
+			}
+
+			if ( $delete ) {
+				$to_delete[] = $src_path;
 			}
 		}
 
-		return null;
+		foreach ( $to_delete as $path ) {
+			if ( \is_file( $path ) ) {
+				$this->unlink( $path );
+
+			} elseif ( \is_dir( $path ) && ! ( new \FilesystemIterator( $path ) )->valid() ) {
+				$this->rmdir( $path );
+			}
+		}
+
+		return $to;
 	}
 
-	public function copy( string $src, string $dest ) : bool {
-		return \copy( $this->parse_uri( $src ), $this->parse_uri( $dest ) );
+	public function copy_from( string | Location $from, ?string $to = null, array $options = [] ) : Location {
+		$from = Location::from( $from );
+
+		$to = $this->locate( $to );
+
+		return $from->copy_to( $to, $options );
+	}
+
+	public function rename( string $from, string $to ) : bool {
+		return \rename( $from, $to );
 	}
 
 	public function file_put_contents( string $filename, mixed $data ) : bool {
 		return (bool) \file_put_contents( $filename, $data );
+	}
+
+	public function file_exists( string $filename ) : bool {
+		return \file_exists( $filename );
+	}
+
+	public function is_file( string $filename ) : bool {
+		return \is_file( $filename );
+	}
+
+	public function is_dir( string $filename ) : bool {
+		return \is_dir( $filename );
 	}
 
 	public function mkdir( string $pathname ) : bool {
@@ -120,12 +261,8 @@ class Local extends Remote {
 		return \mkdir( $pathname, recursive: true );
 	}
 
-	public function is_dir( string $filename ) : bool {
-		return \is_dir( $filename );
-	}
-
-	public function is_file( string $filename ) : bool {
-		return \is_file( $filename );
+	public function rmdir( string $pathname ) : bool {
+		return \rmdir( $pathname );
 	}
 
 	public function unlink( string $filename ) : bool {
